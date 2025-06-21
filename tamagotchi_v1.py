@@ -1,4 +1,4 @@
-#!/usr/bin/env 
+#!/usr/bin/env python3
 
 import pygame
 import math
@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 # Constants
 MIN_SCREEN_WIDTH = 640
 MIN_SCREEN_HEIGHT = 480
-SCREEN_WIDTH = max(MIN_SCREEN_WIDTH, 1080)  # Change 1080 to your desired width
-SCREEN_HEIGHT = max(MIN_SCREEN_HEIGHT, 720)  # Change 720 to your desired height
+SCREEN_WIDTH = max(MIN_SCREEN_WIDTH, 1080)
+SCREEN_HEIGHT = max(MIN_SCREEN_HEIGHT, 720)
 FPS = 30
 
 # Colors
@@ -50,7 +50,6 @@ class EmotionState(Enum):
 
 class SmartTamagotchi:
     """Enhanced Tamagotchi with hardware sensor integration"""
-    
     def __init__(self, x, y, hardware_manager):
         self.x = x
         self.y = y
@@ -65,43 +64,35 @@ class SmartTamagotchi:
         self.message_timer = 0
         self.scale = 1.0
         self.target_scale = 1.0
-        
         # Enhanced stats
         self.happiness = 80
         self.energy = 70
         self.hunger = 60
         self.health = 90
-        self.comfort = 75  # Affected by temperature
-        self.social = 60   # Affected by interaction frequency
-        
+        self.comfort = 75
+        self.social = 60
         # Behavioral states
         self.sleep_mode = False
         self.last_interaction = time.time()
         self.last_fed = time.time()
-        self.idle_timeout = 300  # 5 minutes before getting sleepy
-        self.neglect_timeout = 600  # 10 minutes before getting sad
-        
+        self.idle_timeout = 300
+        self.neglect_timeout = 600
         # Environmental responses
         self.preferred_temp_min = 18
         self.preferred_temp_max = 26
         self.light_sensitive = True
-        
         # Memory system
         self.interaction_history = []
         self.daily_stats = {'interactions': 0, 'feedings': 0, 'play_time': 0}
-        
+
     def update(self, dt):
-        """Update Tamagotchi state based on time and sensor data"""
         current_time = time.time()
         sensor_data = self.hardware.sensor_data
-        
         # Update animation
         self.animation_frame += self.animation_speed * dt * 60
         if self.animation_frame >= 2 * math.pi:
             self.animation_frame = 0
-            
         self.bounce_offset = math.sin(self.animation_frame) * 3
-        
         # Update blinking
         self.blink_timer += dt
         if self.blink_timer >= 3.0:
@@ -109,31 +100,24 @@ class SmartTamagotchi:
             if self.blink_timer >= 3.2:
                 self.is_blinking = False
                 self.blink_timer = 0
-                
         # Update scale animation
         if abs(self.scale - self.target_scale) > 0.01:
             self.scale += (self.target_scale - self.scale) * 0.1
         else:
             self.scale = self.target_scale
             self.target_scale = 1.0
-            
         # Update message timer
         if self.message_timer > 0:
             self.message_timer -= dt
-            
         # Process sensor-based behaviors
         self._process_movement_detection(sensor_data, current_time)
         self._process_environmental_conditions(sensor_data)
         self._process_time_based_needs(current_time, dt)
         self._update_emotion_from_sensors()
         self._update_led_feedback()
-        
-        # Decay stats over time
         self._decay_stats(dt)
-        
+
     def _process_movement_detection(self, sensor_data, current_time):
-        """Handle movement and interaction detection"""
-        # Check if being picked up
         if sensor_data['is_picked_up']:
             if not hasattr(self, '_pickup_message_shown'):
                 self.message = "Wheee! Thanks for picking me up!"
@@ -146,8 +130,6 @@ class SmartTamagotchi:
         else:
             if hasattr(self, '_pickup_message_shown'):
                 delattr(self, '_pickup_message_shown')
-                
-        # Check for shake (play behavior)
         if sensor_data['shake_detected']:
             if not hasattr(self, '_shake_message_shown'):
                 self.message = "That's fun! Shake me more!"
@@ -162,8 +144,6 @@ class SmartTamagotchi:
         else:
             if hasattr(self, '_shake_message_shown'):
                 delattr(self, '_shake_message_shown')
-                
-        # Check for prolonged inactivity
         time_since_movement = current_time - sensor_data['last_movement']
         if time_since_movement > self.idle_timeout and not self.sleep_mode:
             if time_since_movement > self.neglect_timeout:
@@ -173,14 +153,11 @@ class SmartTamagotchi:
                 self.social = max(0, self.social - 1)
             else:
                 self.emotion = EmotionState.SLEEPY
-                
+
     def _process_environmental_conditions(self, sensor_data):
-        """Respond to environmental sensor data"""
         temp = sensor_data['temperature']
         light = sensor_data['light_level']
         sound = sensor_data['sound_level']
-        
-        # Temperature comfort
         if temp < self.preferred_temp_min:
             self.comfort = max(0, self.comfort - 0.5)
             if temp < 10:
@@ -195,8 +172,6 @@ class SmartTamagotchi:
                 self.message_timer = 2.0
         else:
             self.comfort = min(100, self.comfort + 0.2)
-            
-        # Light level responses
         env_state = self.hardware.get_environment_state()
         if env_state == EnvironmentState.NIGHT and not self.sleep_mode:
             if self.energy < 50:
@@ -210,47 +185,35 @@ class SmartTamagotchi:
             self.message_timer = 3.0
             self.energy = min(100, self.energy + 20)
             self.emotion = EmotionState.HAPPY
-            
-        # Sound level responses
-        if sound > 80:  # Loud noise
+        if sound > 80:
             self.emotion = EmotionState.SCARED
             self.message = "That was loud! I'm scared!"
             self.message_timer = 2.0
             self.happiness = max(0, self.happiness - 5)
-            
+
     def _process_time_based_needs(self, current_time, dt):
-        """Handle time-based needs like hunger and energy"""
-        # Hunger increases over time
         time_since_fed = current_time - self.last_fed
-        if time_since_fed > 1800:  # 30 minutes
+        if time_since_fed > 1800:
             self.hunger = max(0, self.hunger - 10 * dt)
-            
-        # Energy decreases when active, increases when sleeping
         if self.sleep_mode:
             self.energy = min(100, self.energy + 5 * dt)
         else:
             self.energy = max(0, self.energy - 2 * dt)
-            
-        # Health affected by other stats
         avg_care = (self.happiness + self.hunger + self.energy + self.comfort) / 4
         if avg_care < 30:
             self.health = max(0, self.health - 1 * dt)
         elif avg_care > 70:
             self.health = min(100, self.health + 0.5 * dt)
-            
+
     def _decay_stats(self, dt):
-        """Natural stat decay over time"""
         if not self.sleep_mode:
             self.happiness = max(0, self.happiness - 0.3 * dt)
             self.social = max(0, self.social - 0.2 * dt)
-            
+
     def _update_emotion_from_sensors(self):
-        """Update emotion based on current sensor conditions and stats"""
         if self.sleep_mode:
             self.emotion = EmotionState.SLEEPY
             return
-            
-        # Priority-based emotion selection
         if self.health < 30:
             self.emotion = EmotionState.SAD
         elif self.hunger < 20:
@@ -264,28 +227,25 @@ class SmartTamagotchi:
             self.emotion = EmotionState.SAD
         else:
             self.emotion = EmotionState.HAPPY
-            
+
     def _update_led_feedback(self):
-        """Update RGB LEDs based on current emotion"""
         emotion_colors = {
-            EmotionState.HAPPY: (0, 255, 0),      # Green
-            EmotionState.SAD: (0, 0, 255),        # Blue
-            EmotionState.ANGRY: (255, 0, 0),      # Red
-            EmotionState.SLEEPY: (128, 0, 128),   # Purple
-            EmotionState.EXCITED: (255, 255, 0),  # Yellow
-            EmotionState.COLD: (0, 255, 255),     # Cyan
-            EmotionState.HOT: (255, 128, 0),      # Orange
-            EmotionState.SCARED: (255, 0, 255),   # Magenta
-            EmotionState.PLAYFUL: (0, 255, 128),  # Green-cyan
-            EmotionState.NEUTRAL: (255, 255, 255) # White
+            EmotionState.HAPPY: (0, 255, 0),
+            EmotionState.SAD: (0, 0, 255),
+            EmotionState.ANGRY: (255, 0, 0),
+            EmotionState.SLEEPY: (128, 0, 128),
+            EmotionState.EXCITED: (255, 255, 0),
+            EmotionState.COLD: (0, 255, 255),
+            EmotionState.HOT: (255, 128, 0),
+            EmotionState.SCARED: (255, 0, 255),
+            EmotionState.PLAYFUL: (0, 255, 128),
+            EmotionState.NEUTRAL: (255, 255, 255)
         }
-        
         color = emotion_colors.get(self.emotion, (255, 255, 255))
         brightness = 0.1 if self.sleep_mode else 0.3
         self.hardware.set_led_color(color, brightness)
-        
+
     def feed(self):
-        """Feed the Tamagotchi"""
         self.hunger = min(100, self.hunger + 30)
         self.happiness = min(100, self.happiness + 10)
         self.health = min(100, self.health + 5)
@@ -296,9 +256,8 @@ class SmartTamagotchi:
         self.target_scale = 1.2
         self.daily_stats['feedings'] += 1
         self.hardware.play_sound(600, 0.3)
-        
+
     def pet(self):
-        """Pet the Tamagotchi"""
         self.happiness = min(100, self.happiness + 20)
         self.social = min(100, self.social + 15)
         self.comfort = min(100, self.comfort + 10)
@@ -308,9 +267,8 @@ class SmartTamagotchi:
         self.target_scale = 1.1
         self.daily_stats['interactions'] += 1
         self.hardware.play_sound(800, 0.2)
-        
+
     def play(self):
-        """Play with the Tamagotchi"""
         self.happiness = min(100, self.happiness + 25)
         self.social = min(100, self.social + 20)
         self.energy = max(0, self.energy - 15)
@@ -321,9 +279,8 @@ class SmartTamagotchi:
         self.daily_stats['play_time'] += 1
         self.hardware.play_sound(1000, 0.1)
         self.hardware.move_servo(90)
-        
+
     def put_to_sleep(self):
-        """Put Tamagotchi to sleep"""
         self.sleep_mode = True
         self.energy = min(100, self.energy + 30)
         self.last_interaction = time.time()
@@ -331,9 +288,8 @@ class SmartTamagotchi:
         self.message_timer = 3.0
         self.emotion = EmotionState.SLEEPY
         self.hardware.play_sound(400, 0.5)
-        
+
     def wake_up(self):
-        """Wake up the Tamagotchi"""
         if self.sleep_mode:
             self.sleep_mode = False
             self.energy = min(100, self.energy + 10)
@@ -570,22 +526,20 @@ class SmartTamagotchi:
 
 class GameManager:
     """Main game manager class"""
-    
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
         pygame.display.set_caption("Smart Raspberry Pi Tamagotchi")
         self.clock = pygame.time.Clock()
         self.running = True
-        
-        # Create Tamagotchi
-        self.tamagotchi = SmartTamagotchi(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, HardwareManager())
-        
-        # UI elements
+        self.hardware = HardwareManager()
+        if getattr(self.hardware, 'simulation', False):
+            print("[WARNING] Hardware not available, running in simulation mode.")
+        self.tamagotchi = SmartTamagotchi(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, self.hardware)
         self.buttons = self._create_ui_buttons()
         self.env_buttons = self._create_env_buttons()
         self.show_debug = False
-        
+
     def _create_ui_buttons(self):
         """Create UI buttons for interaction"""
         button_width = int(SCREEN_WIDTH * 0.07)
