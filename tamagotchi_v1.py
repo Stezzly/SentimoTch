@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-Raspberry Pi Hardware Tamagotchi with Multiple Sensors
-Supports: Light sensor, Temperature, 6DOF IMU, Sound, Buttons, RGB LEDs, Buzzer
-"""
+#!/usr/bin/env 
 
 import pygame
 import math
@@ -12,24 +9,7 @@ import json
 from enum import Enum
 from datetime import datetime, timedelta
 import logging
-
-# Hardware imports (install with: pip install adafruit-circuitpython-*)
-try:
-    import board
-    import busio
-    import digitalio
-    import analogio
-    import adafruit_mpu6050
-    import adafruit_bmp280
-    import adafruit_tsl2591
-    import neopixel
-    import pwmio
-    from adafruit_motor import servo
-    HARDWARE_AVAILABLE = True
-except ImportError as e:
-    print(f"Hardware libraries not available: {e}")
-    print("Running in simulation mode...")
-    HARDWARE_AVAILABLE = False
+from hardware.hardware_manager import HardwareManager, EnvironmentState, Season
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -67,279 +47,6 @@ class EmotionState(Enum):
     HOT = "hot"
     SCARED = "scared"
     PLAYFUL = "playful"
-
-class EnvironmentState(Enum):
-    DAY = "day"
-    NIGHT = "night"
-    DAWN = "dawn"
-    DUSK = "dusk"
-
-class Season(Enum):
-    SPRING = "spring"
-    SUMMER = "summer"
-    AUTUMN = "autumn"
-    WINTER = "winter"
-
-class HardwareManager:
-    """Manages all hardware sensors and outputs"""
-    
-    def __init__(self):
-        self.hardware_available = HARDWARE_AVAILABLE
-        self.sim_light_level = 500
-        self.sim_temperature = 22.0
-        self.sim_sound_level = 30
-        self.sim_season = Season.SPRING
-        self.sim_time = EnvironmentState.DAY
-        self.simulate_motion_flag = False
-        self.sensor_data = {
-            'light_level': self.sim_light_level,  # 0-1000
-            'temperature': self.sim_temperature,  # Celsius
-            'humidity': 50.0,     # Percentage
-            'acceleration': {'x': 0, 'y': 0, 'z': 0},
-            'gyro': {'x': 0, 'y': 0, 'z': 0},
-            'sound_level': self.sim_sound_level,    # dB
-            'button_states': {'feed': False, 'pet': False, 'play': False, 'sleep': False},
-            'last_movement': time.time(),
-            'is_picked_up': False,
-            'shake_detected': False
-        }
-        self.sim_season_list = list(Season)
-        self.sim_time_list = list(EnvironmentState)
-        self.sim_season_idx = 0
-        self.sim_time_idx = 0
-        if self.hardware_available:
-            self._init_hardware()
-        else:
-            self._init_simulation()
-        # Start sensor reading thread
-        self.running = True
-        self.sensor_thread = threading.Thread(target=self._sensor_loop, daemon=True)
-        self.sensor_thread.start()
-        
-    def _init_hardware(self):
-        """Initialize all hardware components"""
-        try:
-            # I2C setup
-            self.i2c = busio.I2C(board.SCL, board.SDA)
-            
-            # Light sensor (TSL2591)
-            self.light_sensor = adafruit_tsl2591.TSL2591(self.i2c)
-            
-            # Temperature/Pressure sensor (BMP280)
-            self.temp_sensor = adafruit_bmp280.Adafruit_BMP280_I2C(self.i2c)
-            self.temp_sensor.sea_level_pressure = 1013.25
-            
-            # 6DOF IMU (MPU6050)
-            self.imu = adafruit_mpu6050.MPU6050(self.i2c)
-            
-            # RGB LEDs (NeoPixel strip)
-            self.pixels = neopixel.NeoPixel(board.D18, 8, brightness=0.3)
-            
-            # Buttons (GPIO pins with pull-up resistors)
-            self.buttons = {
-                'feed': digitalio.DigitalInOut(board.D2),
-                'pet': digitalio.DigitalInOut(board.D3),
-                'play': digitalio.DigitalInOut(board.D4),
-                'sleep': digitalio.DigitalInOut(board.D17)
-            }
-            
-            for button in self.buttons.values():
-                button.direction = digitalio.Direction.INPUT
-                button.pull = digitalio.Pull.UP
-                
-            # Buzzer (PWM)
-            self.buzzer = pwmio.PWMOut(board.D12, frequency=440, duty_cycle=0)
-            
-            # Sound sensor (analog)
-            self.sound_sensor = analogio.AnalogIn(board.A0)
-            
-            # Servo motor for "tail" or movement
-            self.servo_pwm = pwmio.PWMOut(board.D13, frequency=50)
-            self.servo = servo.Servo(self.servo_pwm)
-            
-            logger.info("Hardware initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Hardware initialization failed: {e}")
-            self.hardware_available = False
-            self._init_simulation()
-            
-    def _init_simulation(self):
-        """Initialize simulation values when hardware is not available"""
-        logger.info("Running in simulation mode")
-        self.simulation_time = time.time()
-        
-    def _sensor_loop(self):
-        """Main sensor reading loop"""
-        while self.running:
-            try:
-                if self.hardware_available:
-                    self._read_real_sensors()
-                else:
-                    self._simulate_sensors()
-                    
-                self._process_sensor_data()
-                time.sleep(0.1)  # 10Hz update rate
-                
-            except Exception as e:
-                logger.error(f"Sensor reading error: {e}")
-                time.sleep(1)
-                
-    def _read_real_sensors(self):
-        """Read data from actual hardware sensors"""
-        try:
-            # Light sensor
-            self.sensor_data['light_level'] = self.light_sensor.lux
-            
-            # Temperature and pressure
-            self.sensor_data['temperature'] = self.temp_sensor.temperature
-            self.sensor_data['humidity'] = random.uniform(40, 70)  # Simulate humidity
-            
-            # IMU data
-            accel = self.imu.acceleration
-            gyro = self.imu.gyro
-            
-            self.sensor_data['acceleration'] = {
-                'x': accel[0], 'y': accel[1], 'z': accel[2]
-            }
-            self.sensor_data['gyro'] = {
-                'x': gyro[0], 'y': gyro[1], 'z': gyro[2]
-            }
-            
-            # Sound level (convert analog to dB approximation)
-            sound_raw = self.sound_sensor.value
-            self.sensor_data['sound_level'] = (sound_raw / 65536) * 100
-            
-            # Button states
-            for name, button in self.buttons.items():
-                self.sensor_data['button_states'][name] = not button.value
-                
-        except Exception as e:
-            logger.error(f"Real sensor reading error: {e}")
-            
-    def _simulate_sensors(self):
-        """Simulate sensor data for testing without hardware (now static, only changes by UI)"""
-        # Use the current simulated values
-        self.sensor_data['light_level'] = self.sim_light_level
-        self.sensor_data['temperature'] = self.sim_temperature
-        self.sensor_data['sound_level'] = self.sim_sound_level
-        # Simulate motion if flag is set
-        if hasattr(self, 'simulate_motion_flag') and self.simulate_motion_flag:
-            self.sensor_data['acceleration']['x'] = 3.5
-            self.sensor_data['acceleration']['y'] = 3.5
-            self.sensor_data['acceleration']['z'] = 12.0
-            self.sensor_data['last_movement'] = time.time()
-            self.simulate_motion_flag = False
-        else:
-            # Simulate movement (random with some bias)
-            if random.random() < 0.01:  # 1% chance of movement each update
-                self.sensor_data['acceleration']['x'] = random.uniform(-2, 2)
-                self.sensor_data['acceleration']['y'] = random.uniform(-2, 2)
-                self.sensor_data['acceleration']['z'] = random.uniform(8, 12)  # Gravity + movement
-                self.sensor_data['last_movement'] = time.time()
-            else:
-                self.sensor_data['acceleration']['z'] = 9.8  # Just gravity
-        # Simulate gyro
-        self.sensor_data['gyro'] = {
-            'x': random.uniform(-0.1, 0.1),
-            'y': random.uniform(-0.1, 0.1),
-            'z': random.uniform(-0.1, 0.1)
-        }
-        # Simulate button presses (rare)
-        for button_name in self.sensor_data['button_states']:
-            self.sensor_data['button_states'][button_name] = False
-        
-    def _process_sensor_data(self):
-        """Process raw sensor data into meaningful states"""
-        # Detect if device is picked up (Z-axis acceleration significantly different from gravity)
-        accel_z = abs(self.sensor_data['acceleration']['z'])
-        if accel_z < 8 or accel_z > 11:  # Not just sitting (gravity = ~9.8)
-            self.sensor_data['is_picked_up'] = True
-            self.sensor_data['last_movement'] = time.time()
-        else:
-            self.sensor_data['is_picked_up'] = False
-            
-        # Detect shake (high acceleration in any axis)
-        total_accel = sum(abs(self.sensor_data['acceleration'][axis]) for axis in ['x', 'y'])
-        if total_accel > 3:
-            self.sensor_data['shake_detected'] = True
-            self.sensor_data['last_movement'] = time.time()
-        else:
-            self.sensor_data['shake_detected'] = False
-            
-    def get_environment_state(self):
-        """Determine current environment state based on simulated value"""
-        if self.hardware_available:
-            light = self.sensor_data['light_level']
-            if light > 600:
-                return EnvironmentState.DAY
-            elif light > 200:
-                return EnvironmentState.DUSK
-            elif light > 50:
-                return EnvironmentState.DAWN
-            else:
-                return EnvironmentState.NIGHT
-        else:
-            return self.sim_time
-            
-    def get_season(self):
-        """Determine season based on simulated value"""
-        if self.hardware_available:
-            temp = self.sensor_data['temperature']
-            if temp > 25:
-                return Season.SUMMER
-            elif temp > 15:
-                return Season.SPRING
-            elif temp > 5:
-                return Season.AUTUMN
-            else:
-                return Season.WINTER
-        else:
-            return self.sim_season
-            
-    def set_led_color(self, color, brightness=0.3):
-        """Set RGB LED strip color"""
-        if self.hardware_available and hasattr(self, 'pixels'):
-            try:
-                self.pixels.brightness = brightness
-                self.pixels.fill(color)
-                self.pixels.show()
-            except Exception as e:
-                logger.error(f"LED error: {e}")
-                
-    def play_sound(self, frequency, duration=0.1):
-        """Play a sound through the buzzer"""
-        if self.hardware_available and hasattr(self, 'buzzer'):
-            try:
-                self.buzzer.frequency = frequency
-                self.buzzer.duty_cycle = 32768  # 50% duty cycle
-                time.sleep(duration)
-                self.buzzer.duty_cycle = 0
-            except Exception as e:
-                logger.error(f"Buzzer error: {e}")
-                
-    def move_servo(self, angle):
-        """Move servo motor (for tail or other movement)"""
-        if self.hardware_available and hasattr(self, 'servo'):
-            try:
-                self.servo.angle = max(0, min(180, angle))
-            except Exception as e:
-                logger.error(f"Servo error: {e}")
-                
-    def cleanup(self):
-        """Clean up hardware resources"""
-        self.running = False
-        if hasattr(self, 'sensor_thread'):
-            self.sensor_thread.join(timeout=1)
-            
-        if self.hardware_available:
-            try:
-                if hasattr(self, 'pixels'):
-                    self.pixels.fill((0, 0, 0))
-                if hasattr(self, 'buzzer'):
-                    self.buzzer.duty_cycle = 0
-            except Exception as e:
-                logger.error(f"Cleanup error: {e}")
 
 class SmartTamagotchi:
     """Enhanced Tamagotchi with hardware sensor integration"""
@@ -871,11 +578,8 @@ class GameManager:
         self.clock = pygame.time.Clock()
         self.running = True
         
-        # Initialize hardware
-        self.hardware = HardwareManager()
-        
         # Create Tamagotchi
-        self.tamagotchi = SmartTamagotchi(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, self.hardware)
+        self.tamagotchi = SmartTamagotchi(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, HardwareManager())
         
         # UI elements
         self.buttons = self._create_ui_buttons()
@@ -932,7 +636,7 @@ class GameManager:
         
     def handle_hardware_buttons(self):
         """Handle physical button presses"""
-        button_states = self.hardware.sensor_data['button_states']
+        button_states = self.tamagotchi.hardware.sensor_data['button_states']
         
         if button_states['feed']:
             self.tamagotchi.feed()
@@ -996,7 +700,7 @@ class GameManager:
                             self.show_debug = not self.show_debug
                         elif action == "motion":
                             # Set flag to simulate motion in the next sensor cycle
-                            self.hardware.simulate_motion_flag = True
+                            self.tamagotchi.hardware.simulate_motion_flag = True
                 for button in self.env_buttons:
                     if button["action"] and button["rect"].collidepoint(mouse_pos):
                         self.handle_env_button(button["action"])
@@ -1004,23 +708,23 @@ class GameManager:
     def handle_env_button(self, action):
         """Handle environment/sensor control button actions"""
         if action == "light_up":
-            self.hardware.sim_light_level = min(1000, self.hardware.sim_light_level + 50)
+            self.tamagotchi.hardware.sim_light_level = min(1000, self.tamagotchi.hardware.sim_light_level + 50)
         elif action == "light_down":
-            self.hardware.sim_light_level = max(0, self.hardware.sim_light_level - 50)
+            self.tamagotchi.hardware.sim_light_level = max(0, self.tamagotchi.hardware.sim_light_level - 50)
         elif action == "temp_up":
-            self.hardware.sim_temperature = min(40, self.hardware.sim_temperature + 1)
+            self.tamagotchi.hardware.sim_temperature = min(40, self.tamagotchi.hardware.sim_temperature + 1)
         elif action == "temp_down":
-            self.hardware.sim_temperature = max(-10, self.hardware.sim_temperature - 1)
+            self.tamagotchi.hardware.sim_temperature = max(-10, self.tamagotchi.hardware.sim_temperature - 1)
         elif action == "sound_up":
-            self.hardware.sim_sound_level = min(120, self.hardware.sim_sound_level + 5)
+            self.tamagotchi.hardware.sim_sound_level = min(120, self.tamagotchi.hardware.sim_sound_level + 5)
         elif action == "sound_down":
-            self.hardware.sim_sound_level = max(0, self.hardware.sim_sound_level - 5)
+            self.tamagotchi.hardware.sim_sound_level = max(0, self.tamagotchi.hardware.sim_sound_level - 5)
         elif action == "season_next":
-            self.hardware.sim_season_idx = (self.hardware.sim_season_idx + 1) % len(self.hardware.sim_season_list)
-            self.hardware.sim_season = self.hardware.sim_season_list[self.hardware.sim_season_idx]
+            self.tamagotchi.hardware.sim_season_idx = (self.tamagotchi.hardware.sim_season_idx + 1) % len(self.tamagotchi.hardware.sim_season_list)
+            self.tamagotchi.hardware.sim_season = self.tamagotchi.hardware.sim_season_list[self.tamagotchi.hardware.sim_season_idx]
         elif action == "time_next":
-            self.hardware.sim_time_idx = (self.hardware.sim_time_idx + 1) % len(self.hardware.sim_time_list)
-            self.hardware.sim_time = self.hardware.sim_time_list[self.hardware.sim_time_idx]
+            self.tamagotchi.hardware.sim_time_idx = (self.tamagotchi.hardware.sim_time_idx + 1) % len(self.tamagotchi.hardware.sim_time_list)
+            self.tamagotchi.hardware.sim_time = self.tamagotchi.hardware.sim_time_list[self.tamagotchi.hardware.sim_time_idx]
     
     def draw_ui_buttons(self):
         """Draw interactive UI buttons, scaled to window size and align top UI text under buttons"""
@@ -1045,15 +749,15 @@ class GameManager:
             show_value = (button["action"] is None) or (label == "season") or (label == "time")
             if show_value:
                 if label == "light":
-                    val_text = font_small.render(f"{int(self.hardware.sim_light_level)}", True, BLACK)
+                    val_text = font_small.render(f"{int(self.tamagotchi.hardware.sim_light_level)}", True, BLACK)
                 elif label == "temp":
-                    val_text = font_small.render(f"{self.hardware.sim_temperature:.1f}C", True, BLACK)
+                    val_text = font_small.render(f"{self.tamagotchi.hardware.sim_temperature:.1f}C", True, BLACK)
                 elif label == "sound":
-                    val_text = font_small.render(f"{int(self.hardware.sim_sound_level)}dB", True, BLACK)
+                    val_text = font_small.render(f"{int(self.tamagotchi.hardware.sim_sound_level)}dB", True, BLACK)
                 elif label == "season":
-                    val_text = font_small.render(self.hardware.sim_season.value.title(), True, BLACK)
+                    val_text = font_small.render(self.tamagotchi.hardware.sim_season.value.title(), True, BLACK)
                 elif label == "time":
-                    val_text = font_small.render(self.hardware.sim_time.value.title(), True, BLACK)
+                    val_text = font_small.render(self.tamagotchi.hardware.sim_time.value.title(), True, BLACK)
                 else:
                     val_text = None
                 if val_text:
@@ -1062,8 +766,8 @@ class GameManager:
     
     def draw_background(self):
         """Draw environment-appropriate background"""
-        env_state = self.hardware.get_environment_state()
-        season = self.hardware.get_season()
+        env_state = self.tamagotchi.hardware.get_environment_state()
+        season = self.tamagotchi.hardware.get_season()
         
         # Base colors
         if env_state == EnvironmentState.DAY:
@@ -1130,12 +834,7 @@ class GameManager:
         except KeyboardInterrupt:
             print("Shutting down gracefully...")
         finally:
-            self.cleanup()
-    
-    def cleanup(self):
-        """Clean up resources"""
-        self.hardware.cleanup()
-        pygame.quit()
+            pygame.quit()
 
 def main():
     """Main entry point"""
