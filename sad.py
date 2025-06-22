@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Simple Tamagotchi with 3-button control
+# Simple Tamagotchi with 3-button control and LED eyes
 import os
 import sys
 import time
@@ -9,7 +9,7 @@ import termios
 import tty
 import glob
 import RPi.GPIO as GPIO
-from gpiozero import Button
+from gpiozero import Button, PWMLED
 from threading import Thread
 sys.path.append("..")
 from lib import LCD_2inch
@@ -25,6 +25,11 @@ SCREEN_WIDTH = 240          # Display width
 SCREEN_HEIGHT = 320         # Display height
 FLIP_HORIZONTAL = False     # Set to True to flip horizontally
 FLIP_VERTICAL = False       # Set to True to flip vertically
+
+# LED EYES CONFIGURATION
+LED_RED_PIN = 20           # GPIO pin for red LED
+LED_GREEN_PIN = 22         # GPIO pin for green LED
+LED_BRIGHTNESS = 0.8       # LED brightness (0.0 to 1.0)
 
 # EMOJI CONFIGURATION
 EMOTIONS_FOLDER = "assets"  # Folder containing emotion images
@@ -92,6 +97,17 @@ class SimpleTamagotchi:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(IR_PIN, GPIO.IN)
         
+        # Initialize LED eyes - do this after GPIO setup to avoid conflicts
+        try:
+            self.led_red = PWMLED(LED_RED_PIN)
+            self.led_green = PWMLED(LED_GREEN_PIN)
+            self.current_led_state = "sleep"  # Track current LED state
+            print(f"LED Eyes initialized: Red=GPIO{LED_RED_PIN}, Green=GPIO{LED_GREEN_PIN}")
+        except Exception as e:
+            print(f"Error initializing LED eyes: {e}")
+            self.led_red = None
+            self.led_green = None
+        
         # Emoji to image mapping
         self.emoji_map = {
             "happy": "heart_happy.png",
@@ -120,6 +136,60 @@ class SimpleTamagotchi:
         self.load_temp_icons()
         self.load_stats_icons()
         
+        # Set initial LED state
+        self.update_led_eyes()
+        
+    def get_led_state(self):
+        """Determine LED state based on pet's condition"""
+        # If interaction is active, use forced emotion for LED state
+        if self.forced_emotion is not None:
+            if self.forced_emotion in ["angry"]:
+                return "angry"
+            elif self.forced_emotion in ["excited", "happy"]:
+                return "happy"
+            else:
+                return "sleep"
+        
+        # Determine LED state based on stats
+        if self.health < 30 or self.hungry > 80:
+            return "sleep"  # Pet is too weak/tired
+        elif self.hungry < 20 or self.health < 20:
+            return "angry"  # Pet is angry due to neglect
+        elif self.happy > 60 and self.health > 60:
+            return "happy"  # Pet is content
+        else:
+            return "sleep"  # Default neutral state
+    
+    def update_led_eyes(self):
+        """Update LED eyes based on current state"""
+        new_state = self.get_led_state()
+        
+        # Only update if state has changed to reduce unnecessary GPIO operations
+        if new_state != self.current_led_state:
+            # Always turn off both LEDs first to ensure clean state
+            if self.led_red:
+                self.led_red.off()
+            if self.led_green:
+                self.led_green.off()
+            
+            if new_state == "sleep":
+                # Both LEDs already off
+                print("LED Eyes: Sleep (OFF)")
+                
+            elif new_state == "happy":
+                # Turn on green LED only
+                if self.led_green:
+                    self.led_green.value = LED_BRIGHTNESS
+                print("LED Eyes: Happy (GREEN)")
+                
+            elif new_state == "angry":
+                # Turn on red LED only
+                if self.led_red:
+                    self.led_red.value = LED_BRIGHTNESS
+                print("LED Eyes: Angry (RED)")
+            
+            self.current_led_state = new_state
+        
     def load_emotion_images(self):
         """Load emotion images from the emotions folder"""
         for emotion, filename in self.emoji_map.items():
@@ -128,7 +198,7 @@ class SimpleTamagotchi:
                 if os.path.exists(image_path):
                     # Load and resize image to fit in the display area (80x80 pixels - increased from 60x60)
                     img = Image.open(image_path)
-                    img = img.resize((80, 80), Image.Resampling.LANCZOS)
+                    img = img.resize((100, 100), Image.Resampling.LANCZOS)
                     self.emotion_images[emotion] = img
                     print(f"Loaded emotion image: {emotion}")
                 else:
@@ -341,6 +411,11 @@ class SimpleTamagotchi:
     def heal(self):
         self.health = min(100, self.health + 20)
         self.hungry = max(0, self.hungry - 5)
+    
+    def cleanup(self):
+        """Clean up LED resources"""
+        self.led_red.close()
+        self.led_green.close()
 
 def draw_ui(draw, pet, font_small, font_large):
     # Clear screen
@@ -445,15 +520,10 @@ def draw_ui(draw, pet, font_small, font_large):
     
     # Action selection
     y = 240
-    draw.text((20, y), "Actions:", fill="BLACK", font=font_small)
-    
     for i, action in enumerate(pet.actions):
         color = "YELLOW" if i == pet.current_action else "LIGHTGRAY"
         draw.rectangle([(20 + i*70, y+25), (80 + i*70, y+50)], fill=color, outline="BLACK")
         draw.text((25 + i*70, y+30), action, fill="BLACK", font=font_small)
-    
-    # Controls
-    draw.text((20, 300), "Keys: A/D=Navigate  S=Action", fill="BLACK", font=font_small)
 
 def keyboard_input_handler():
     """Handle keyboard input in a separate thread"""
@@ -490,6 +560,7 @@ def keyboard_input_handler():
                     print("H - Show this help")
                     print("Q - Quit")
                     print(f"Current stats: Health={pet.health}, Happy={pet.happy}, Hungry={pet.hungry}")
+                    print(f"LED Eyes: {pet.current_led_state}")
                     
     except Exception as e:
         print(f"Keyboard input error: {e}")
@@ -531,6 +602,7 @@ def stats_updater():
         pet.update_stats()
         pet.read_temperature()  # Read temperature every update cycle
         pet.check_ir_sensor()   # Check IR sensor for interactions
+        pet.update_led_eyes()   # Update LED eyes based on current state
         update_display = True
         time.sleep(SENSOR_CHECK_INTERVAL)  # Use configured interval
 
@@ -561,6 +633,7 @@ try:
     print(f"Use buttons: GPIO{LEFT_BUTTON_PIN}=Left, GPIO{SELECT_BUTTON_PIN}=Select")
     print("Or use keyboard: A=Left, D=Right, S=Select, H=Help, Q=Quit")
     print(f"Temperature sensor on GPIO16, IR sensor on GPIO{IR_PIN}")
+    print(f"LED Eyes: Red=GPIO{LED_RED_PIN}, Green=GPIO{LED_GREEN_PIN}")
     
     # Main loop
     while True:
@@ -583,9 +656,7 @@ try:
         time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
 except KeyboardInterrupt:
+    pet.cleanup()  # Clean up LED resources
     GPIO.cleanup()  # Clean up GPIO on exit
     disp.module_exit()
     print("Game ended by user")
-
-
-
