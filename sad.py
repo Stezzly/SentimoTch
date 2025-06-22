@@ -20,11 +20,11 @@ from PIL import Image, ImageDraw, ImageFont
 # =============================================================================
 
 # DISPLAY CONFIGURATION - Change these values to adjust the screen
-SCREEN_ROTATION = 0        # Try: 0, 90, 180, 270
-SCREEN_WIDTH = 240          # Display width
-SCREEN_HEIGHT = 320         # Display height
+SCREEN_ROTATION = 0        # Try: 0, 90, 180, 270 - Changed to 90 for horizontal layout
+SCREEN_WIDTH = 320          # Display width - Swapped with height for horizontal layout
+SCREEN_HEIGHT = 240         # Display height - Swapped with width for horizontal layout
 FLIP_HORIZONTAL = False     # Set to True to flip horizontally
-FLIP_VERTICAL = False       # Set to True to flip vertically
+FLIP_VERTICAL =  False       # Set to True to flip vertically
 
 # LED EYES CONFIGURATION
 LED_RED_PIN = 20           # GPIO pin for red LED
@@ -421,92 +421,102 @@ def draw_ui(draw, pet, font_small, font_large):
     # Clear screen
     draw.rectangle([(0, 0), (SCREEN_WIDTH, SCREEN_HEIGHT)], fill="WHITE")
     
-    # Stats - display horizontally with icons at the top
-    y = 10
+    # HORIZONTAL LAYOUT: Actions on left, emotion in center, stats on right
     
-    # Display stats with evenly spaced icons in a row (4 stats now including temperature)
-    total_width = SCREEN_WIDTH - 40  # Leave 20px margin on each side
-    icon_spacing = total_width // 4  # Divide space evenly for 4 stats
-    start_x = 20 + (icon_spacing - 20) // 2  # Center icons within their sections
+    # Action selection column on the LEFT (vertical stack)
+    action_x = 10
+    action_y_start = 20
+    action_spacing = 50
+    action_width = 50
+    action_height = 30
+    for i, action in enumerate(pet.actions):
+        y_pos = action_y_start + i * action_spacing
+        color = "YELLOW" if i == pet.current_action else "LIGHTGRAY"
+        draw.rectangle([(action_x, y_pos), (action_x + action_width, y_pos + action_height)], fill=color, outline="BLACK")
+        
+        # Center the text in the button
+        text_bbox = draw.textbbox((0, 0), action, font=font_small)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        text_x = action_x + (action_width - text_width) // 2
+        text_y = y_pos + (action_height - text_height) // 2
+        draw.text((text_x, text_y), action, fill="BLACK", font=font_small)
+    
+    # Stats column on the RIGHT (vertical stack)
+    stats_x = SCREEN_WIDTH - 80
+    stats_y_start = 20
+    stats_spacing = 50
     
     # Health with icon
-    health_icon_x = start_x
+    y_pos = stats_y_start
     health_state = pet.get_stat_icon_state(pet.health, "health")
     if "health" in pet.stats_icons and health_state in pet.stats_icons["health"]:
         health_icon = pet.stats_icons["health"][health_state]
         icon_rgba = health_icon.convert("RGBA")
         icon_overlay = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
-        icon_overlay.paste(icon_rgba, (health_icon_x, y), icon_rgba)
+        icon_overlay.paste(icon_rgba, (stats_x, y_pos), icon_rgba)
         draw._image.paste(icon_overlay, (0, 0), icon_overlay)
-    # Health percentage below icon
-    draw.text((health_icon_x - 5, y + 25), f"{pet.health}%", fill="BLACK", font=font_small)
+    draw.text((stats_x + 25, y_pos + 2), f"{pet.health}%", fill="BLACK", font=font_small)
     
     # Happy with icon
-    happy_icon_x = start_x + icon_spacing
+    y_pos = stats_y_start + stats_spacing
     happy_state = pet.get_stat_icon_state(pet.happy, "happy")
     if "happy" in pet.stats_icons and happy_state in pet.stats_icons["happy"]:
         happy_icon = pet.stats_icons["happy"][happy_state]
         icon_rgba = happy_icon.convert("RGBA")
         icon_overlay = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
-        icon_overlay.paste(icon_rgba, (happy_icon_x, y), icon_rgba)
+        icon_overlay.paste(icon_rgba, (stats_x, y_pos), icon_rgba)
         draw._image.paste(icon_overlay, (0, 0), icon_overlay)
-    # Happy percentage below icon
-    draw.text((happy_icon_x - 8, y + 25), f"{pet.happy}%", fill="BLACK", font=font_small)
+    draw.text((stats_x + 25, y_pos + 2), f"{pet.happy}%", fill="BLACK", font=font_small)
     
     # Hungry with icon
-    hungry_icon_x = start_x + 2 * icon_spacing
+    y_pos = stats_y_start + 2 * stats_spacing
     hungry_state = pet.get_stat_icon_state(pet.hungry, "hungry")
     if "hungry" in pet.stats_icons and hungry_state in pet.stats_icons["hungry"]:
         hungry_icon = pet.stats_icons["hungry"][hungry_state]
         icon_rgba = hungry_icon.convert("RGBA")
         icon_overlay = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
-        icon_overlay.paste(icon_rgba, (hungry_icon_x, y), icon_rgba)
+        icon_overlay.paste(icon_rgba, (stats_x, y_pos), icon_rgba)
         draw._image.paste(icon_overlay, (0, 0), icon_overlay)
-    # Hungry percentage below icon
-    draw.text((hungry_icon_x - 10, y + 25), f"{pet.hungry}%", fill="BLACK", font=font_small)
+    draw.text((stats_x + 25, y_pos + 2), f"{pet.hungry}%", fill="BLACK", font=font_small)
     
     # Temperature with icon
-    temp_icon_x = start_x + 3 * icon_spacing
+    y_pos = stats_y_start + 3 * stats_spacing
     temp_status = pet.get_temperature_status()
     if temp_status in pet.temp_icons:
         temp_img = pet.temp_icons[temp_status]
-        temp_rgba = temp_img.convert("RGBA")
-        temp_overlay = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
-        # Resize temp icon to match stats icons (20x20)
         temp_resized = temp_img.resize((20, 20), Image.Resampling.LANCZOS)
         temp_rgba = temp_resized.convert("RGBA")
-        temp_overlay.paste(temp_rgba, (temp_icon_x, y), temp_rgba)
+        temp_overlay = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
+        temp_overlay.paste(temp_rgba, (stats_x, y_pos), temp_rgba)
         draw._image.paste(temp_overlay, (0, 0), temp_overlay)
-    # Temperature value below icon
+    # Temperature value next to icon
     if pet.current_temperature is not None:
-        draw.text((temp_icon_x - 15, y + 25), f"{pet.current_temperature:.1f}°C", fill="BLACK", font=font_small)
+        draw.text((stats_x + 25, y_pos + 2), f"{pet.current_temperature:.1f}°C", fill="BLACK", font=font_small)
     else:
-        draw.text((temp_icon_x - 8, y + 25), "N/A", fill="BLACK", font=font_small)
+        draw.text((stats_x + 25, y_pos + 2), "N/A", fill="BLACK", font=font_small)
     
-    # Display interaction message if active
+    # Display interaction message if active (center top)
     if pet.interaction_message:
-        # Create a background box for the message
-        message_x, message_y = 20, 80
+        message_x = (SCREEN_WIDTH - 200) // 2
+        message_y = 10
         message_width, message_height = 200, 25
         draw.rectangle([(message_x, message_y), (message_x + message_width, message_y + message_height)], 
                       fill="YELLOW", outline="BLACK")
         draw.text((message_x + 5, message_y + 5), pet.interaction_message, fill="BLACK", font=font_small)
     
-    # Text output area (empty space for future text messages)
-    text_area_y = 80
-    if not pet.interaction_message:  # Only show when no interaction message
-        draw.rectangle([(20, text_area_y), (220, text_area_y + 25)], fill="WHITE", outline="WHITE")
-        draw.text((25, text_area_y + 5), "", fill="GRAY", font=font_small)
-    
-    # Display emotion image or fallback to text
+    # Display emotion image in the CENTER
     emoji_name = pet.get_current_emoji()
-    emoji_x, emoji_y = 80, 120  # Adjusted position for larger image
-    emoji_size = 80  # Increased size from 60 to 80
+    emoji_size = 120  # Increased from 100 to 120
+    emoji_x = (SCREEN_WIDTH - emoji_size) // 2  # Center horizontally
+    emoji_y = (SCREEN_HEIGHT - emoji_size) // 2  # Center vertically
     
     if emoji_name in pet.emotion_images:
         # Paste the actual emotion image
         emotion_img = pet.emotion_images[emoji_name]
-        image_to_paste = emotion_img.convert("RGBA")
+        # Resize to the new larger size
+        emotion_img_resized = emotion_img.resize((emoji_size, emoji_size), Image.Resampling.LANCZOS)
+        image_to_paste = emotion_img_resized.convert("RGBA")
         # Create a temporary image to paste onto
         temp_img = Image.new("RGBA", (SCREEN_WIDTH, SCREEN_HEIGHT), (255, 255, 255, 0))
         temp_img.paste(image_to_paste, (emoji_x, emoji_y), image_to_paste)
@@ -516,14 +526,7 @@ def draw_ui(draw, pet, font_small, font_large):
         # Fallback to text display
         draw.rectangle([(emoji_x, emoji_y), (emoji_x + emoji_size, emoji_y + emoji_size)], 
                       fill="LIGHTGRAY", outline="BLACK")
-        draw.text((emoji_x + 10, emoji_y + 25), emoji_name.upper(), fill="BLACK", font=font_small)
-    
-    # Action selection
-    y = 240
-    for i, action in enumerate(pet.actions):
-        color = "YELLOW" if i == pet.current_action else "LIGHTGRAY"
-        draw.rectangle([(20 + i*70, y+25), (80 + i*70, y+50)], fill=color, outline="BLACK")
-        draw.text((25 + i*70, y+30), action, fill="BLACK", font=font_small)
+        draw.text((emoji_x + 10, emoji_y + 50), emoji_name.upper(), fill="BLACK", font=font_small)
 
 def keyboard_input_handler():
     """Handle keyboard input in a separate thread"""
@@ -660,3 +663,4 @@ except KeyboardInterrupt:
     GPIO.cleanup()  # Clean up GPIO on exit
     disp.module_exit()
     print("Game ended by user")
+
